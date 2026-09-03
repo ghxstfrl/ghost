@@ -13271,3 +13271,51 @@ end)
 
 getgenv().GhostESP = GhostESP
 print("[Ghost Patch] Loaded. ESP, theme, fixes, and new features active.")
+-- =====================================================
+-- FORCE GHOST THEME OVERRIDE
+-- =====================================================
+local function ForceGhostTheme()
+    local root = gethui and gethui() or game:GetService("CoreGui")
+    local guis = {}
+
+    for _, obj in ipairs(root:GetDescendants()) do
+        if obj:IsA("ScreenGui") then
+            local n = obj.Name:lower()
+            if n:find("kys") or n:find("modern") or n:find("window") or n:find("hub") then
+                table.insert(guis, obj)
+            end
+        end
+    end
+
+    for _, sg in ipairs(guis) do
+        for _, obj in ipairs(sg:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+                obj.Font = Enum.Font.Gotham
+            end
+
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                if obj.TextColor3 then
+                    local c = obj.TextColor3
+                    if c.r > 0.7 and c.g < 0.2 and c.b < 0.2 then
+                        obj.TextColor3 = Color3.fromRGB(130, 240, 255)
+                    end
+                end
+            end
+
+            if obj:IsA("UIStroke") then
+                obj.Color = Color3.fromRGB(130, 240, 255)
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    task.wait(3)
+    ForceGhostTheme()
+    if getgenv().GhostESP then
+        getgenv().GhostESP.Enabled = true
+    end
+    if getgenv().KYS_StartGhostFeatures then
+        pcall(getgenv().KYS_StartGhostFeatures)
+    end
+end)

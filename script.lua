@@ -14199,3 +14199,110 @@ setInstantHealSelf = function(v)
 end
 
 print("[ghxst] Cleanup + lay knocked heal installed.")
+-- =====================================================
+-- OVERRIDE + CLEANUP (Paste at very end)
+-- =====================================================
+
+local LP = game:GetService("Players").LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+
+-- 1. Override heal with clean full heal (no knock, no client-side death)
+setInstantHealSelf = function(v)
+    if v then
+        task.spawn(function()
+            while v do
+                pcall(function()
+                    local char = LP.Character
+                    if not char then return end
+
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health < hum.MaxHealth then
+                        hum.Health = hum.MaxHealth
+                    end
+
+                    local remotes = RS:FindFirstChild("Remotes")
+                    local healing = remotes and remotes:FindFirstChild("Healing")
+                    if healing then
+                        if healing:FindFirstChild("SkillCheckResultEvent") then
+                            healing.SkillCheckResultEvent:FireServer("success", 100, char)
+                        end
+                        local hrp = char:FindFirstChild("HumanoidRootPart")
+                        if hrp and healing:FindFirstChild("HealEvent") then
+                            healing.HealEvent:FireServer(hrp, true)
+                        end
+                    end
+                end)
+                task.wait(0.2)
+            end
+        end)
+    else
+        pcall(function()
+            local char = LP.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local remotes = RS:FindFirstChild("Remotes")
+                local healing = remotes and remotes:FindFirstChild("Healing")
+                if healing and healing:FindFirstChild("HealEvent") then
+                    healing.HealEvent:FireServer(hrp, false)
+                end
+            end
+        end)
+    end
+end
+
+-- 2. Clear any stuck knocked/injured state immediately
+task.spawn(function()
+    task.wait(1)
+    local char = LP.Character
+    if char then
+        for _, flag in ipairs({"Knocked", "IsKnocked", "Downed", "IsDowned", "Bleeding", "IsBleeding"}) do
+            pcall(function() char:SetAttribute(flag, false) end)
+        end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            pcall(function() hum.Health = hum.MaxHealth end)
+            pcall(function() hum.PlatformStand = false end)
+            pcall(function() hum.Sit = false end)
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running) end)
+        end
+    end
+end)
+
+-- 3. Remove cyan squares and keep removing them for 60 seconds
+task.spawn(function()
+    task.wait(2)
+
+    local function clean(parent)
+        if not parent then return end
+        for _, obj in ipairs(parent:GetDescendants()) do
+            -- Destroy ghost branding objects
+            if obj.Name == "GhostStroke" or obj.Name == "GhostGradient" then
+                pcall(function() obj:Destroy() end)
+            end
+
+            -- Hide small visible frames that shouldn't be there
+            if obj:IsA("Frame") or obj:IsA("ImageLabel") then
+                local area = obj.AbsoluteSize.X * obj.AbsoluteSize.Y
+                if area > 100 and area < 10000 then
+                    if obj:IsA("Frame") and obj.BackgroundTransparency <= 0.3 then
+                        pcall(function() obj.BackgroundTransparency = 1 end)
+                    end
+                    if obj:IsA("ImageLabel") and obj.ImageTransparency ~= nil and obj.ImageTransparency <= 0.3 then
+                        pcall(function() obj.ImageTransparency = 1 end)
+                    end
+                end
+            end
+        end
+    end
+
+    for i = 1, 20 do
+        local ok, core = pcall(function() return gethui() end)
+        if ok and core then clean(core) end
+        clean(game:GetService("CoreGui"))
+        clean(LP:FindFirstChild("PlayerGui"))
+        task.wait(3)
+    end
+end)
+
+print("[ghxst] Override + cleanup active. Heal is clean, squares removed.")

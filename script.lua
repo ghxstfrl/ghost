@@ -13859,3 +13859,211 @@ task.spawn(function()
 
     print("[ghxst] GUI branding applied (persistent).")
 end)
+-- =====================================================
+-- AUTO INJURED + MANUAL KNOCK TOGGLE (Replaces smart heal)
+-- Press K to knock yourself down / get back up
+-- =====================================================
+
+local LP = game:GetService("Players").LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+
+local InjuredMode = false
+local ManualKnock = false
+local INJURED_HP = 60
+local KNOCKED_HP = 20
+
+local function GetHealing()
+    local remotes = RS:FindFirstChild("Remotes")
+    return remotes and remotes:FindFirstChild("Healing")
+end
+
+local function SetLocalHP(hp)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum.Health = hp end)
+    end
+end
+
+local function SetKnockedState(state)
+    local char = LP.Character
+    if char then
+        for _, flag in ipairs({"Knocked", "IsKnocked", "Downed", "IsDowned"}) do
+            pcall(function() char:SetAttribute(flag, state) end)
+        end
+    end
+end
+
+local function IsMoving()
+    local char = LP.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    return hrp.AssemblyLinearVelocity.Magnitude > 1
+end
+
+local function FireHealAmount(amount)
+    local char = LP.Character
+    local healing = GetHealing()
+    if not char or not healing then return end
+
+    pcall(function()
+        if healing:FindFirstChild("SkillCheckResultEvent") then
+            healing.SkillCheckResultEvent:FireServer("success", amount, char)
+        end
+    end)
+    pcall(function()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp and healing:FindFirstChild("HealEvent") then
+            healing.HealEvent:FireServer(hrp, false)
+        end
+    end)
+end
+
+-- Override the existing heal toggle with auto-injured only
+setInstantHealSelf = function(v)
+    InjuredMode = v
+
+    if v then
+        task.spawn(function()
+            while InjuredMode do
+                if ManualKnock then
+                    SetLocalHP(KNOCKED_HP)
+                    SetKnockedState(true)
+                else
+                    SetLocalHP(INJURED_HP)
+                    SetKnockedState(false)
+                    if not IsMoving() then
+                        -- Still look injured, not knocked
+                        FireHealAmount(INJURED_HP)
+                    end
+                end
+                task.wait(0.2)
+            end
+
+            -- Cleanup
+            SetKnockedState(false)
+            SetLocalHP(INJURED_HP)
+        end)
+    else
+        SetKnockedState(false)
+        SetLocalHP(INJURED_HP)
+    end
+end
+
+-- Manual knock keybind (K)
+UIS.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.K then
+        ManualKnock = not ManualKnock
+        print("[ghxst] Manual knock:", ManualKnock and "ON" or "OFF")
+
+        if ManualKnock then
+            SetLocalHP(KNOCKED_HP)
+            SetKnockedState(true)
+        else
+            SetKnockedState(false)
+            SetLocalHP(INJURED_HP)
+        end
+    end
+end)
+
+print("[ghxst] Auto injured + manual knock loaded. Press K to toggle knock.")
+-- =====================================================
+-- CLEANUP CYAN SQUARES (GhostStroke/Gradient leftovers)
+-- =====================================================
+task.spawn(function()
+    task.wait(5)
+
+    local function clean(parent)
+        if not parent then return end
+        for _, obj in ipairs(parent:GetDescendants()) do
+            -- Remove any leftover branding strokes/gradients
+            if obj.Name == "GhostStroke" or obj.Name == "GhostGradient" then
+                pcall(function() obj:Destroy() end)
+            end
+
+            -- Reset frames that may have become visible squares
+            if obj:IsA("Frame") and obj.BackgroundTransparency <= 0.2 then
+                -- Only reset small empty frames, not main windows
+                local area = obj.AbsoluteSize.X * obj.AbsoluteSize.Y
+                if area > 100 and area < 5000 then
+                    obj.BackgroundTransparency = 1
+                end
+            end
+        end
+    end
+
+    clean(gethui and gethui())
+    clean(game:GetService("CoreGui"))
+    clean(LocalPlayer:FindFirstChild("PlayerGui"))
+
+    -- Turn off features that can create square visuals
+    local VD = getgenv().VD
+    if VD then
+        VD.RADAR_Enabled = false
+        VD.CROSS_Enabled = false
+        VD.AIM_ShowFOV = false
+        if getgenv().GhostESP then
+            getgenv().GhostESP.Enabled = false
+        end
+    end
+
+    print("[ghxst] Cleanup done. Cyan squares removed.")
+end)
+-- =====================================================
+-- MOBILE MANUAL KNOCK TOGGLE (Replaces K keybind)
+-- =====================================================
+task.spawn(function()
+    task.wait(3)
+
+    if not Window then return end
+
+    -- Find or create Extras tab
+    local ExtrasTab = Window:FindFirstChild("Extras")
+    if not ExtrasTab then
+        ExtrasTab = Window:AddTab({ Name = "Extras", Icon = "lucide:zap", Type = "Single" })
+    end
+
+    local knockSection = ExtrasTab:AddSection({
+        Position = "Center",
+        Name = "Knock Control",
+        Icon = "lucide:heart",
+        Box = true,
+        BoxBorder = true,
+        Opened = true,
+    })
+
+    local knockToggle
+    knockToggle = knockSection:AddToggle({
+        Name = "Knocked Down",
+        Flag = "Ghxst_ManualKnock",
+        Default = false,
+        Callback = function(v)
+            ManualKnock = v
+            if ManualKnock then
+                SetLocalHP(KNOCKED_HP)
+                SetKnockedState(true)
+            else
+                SetKnockedState(false)
+                SetLocalHP(INJURED_HP)
+            end
+        end
+    })
+
+    -- Also add a button for quick toggle
+    knockSection:AddButton({
+        Name = "Knock Self / Get Up",
+        Callback = function()
+            ManualKnock = not ManualKnock
+            knockToggle:Set(ManualKnock)
+            if ManualKnock then
+                SetLocalHP(KNOCKED_HP)
+                SetKnockedState(true)
+            else
+                SetKnockedState(false)
+                SetLocalHP(INJURED_HP)
+            end
+        end
+    })
+end)

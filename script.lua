@@ -13319,3 +13319,87 @@ task.spawn(function()
         pcall(getgenv().KYS_StartGhostFeatures)
     end
 end)
+-- =====================================================
+-- INSTANT FULL HEAL OVERRIDE
+-- =====================================================
+local LP = game:GetService("Players").LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+
+local InstantFullHeal = false
+
+local function ForceFullHeal()
+    local char = LP.Character
+    if not char then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    -- Set health to max on your client immediately
+    pcall(function()
+        hum.Health = hum.MaxHealth
+    end)
+
+    -- Clear common downed/bleed states
+    for _, flag in ipairs({"Downed", "Bleeding", "IsBleeding", "Knocked", "IsKnocked", "Ragdolled"}) do
+        pcall(function()
+            char:SetAttribute(flag, false)
+        end)
+    end
+
+    -- Fire the most direct heal remote
+    pcall(function()
+        local remotes = RS:FindFirstChild("Remotes")
+        local healing = remotes and remotes:FindFirstChild("Healing")
+        if healing and healing:FindFirstChild("SkillCheckResultEvent") then
+            healing.SkillCheckResultEvent:FireServer("success", 100, char)
+        end
+    end)
+
+    -- Fire heal start to keep the server in sync
+    pcall(function()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local remotes = RS:FindFirstChild("Remotes")
+        local healing = remotes and remotes:FindFirstChild("Healing")
+        if hrp and healing and healing:FindFirstChild("HealEvent") then
+            healing.HealEvent:FireServer(hrp, true)
+        end
+    end)
+end
+
+setInstantHealSelf = function(v)
+    InstantFullHeal = v
+
+    if v then
+        task.spawn(function()
+            while InstantFullHeal do
+                ForceFullHeal()
+                task.wait(0.1)
+            end
+
+            -- Stop heal cleanly when toggled off
+            local char = LP.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                pcall(function()
+                    local remotes = RS:FindFirstChild("Remotes")
+                    local healing = remotes and remotes:FindFirstChild("Healing")
+                    if healing and healing:FindFirstChild("HealEvent") then
+                        healing.HealEvent:FireServer(hrp, false)
+                    end
+                end)
+            end
+        end)
+    else
+        local char = LP.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            pcall(function()
+                local remotes = RS:FindFirstChild("Remotes")
+                local healing = remotes and remotes:FindFirstChild("Healing")
+                if healing and healing:FindFirstChild("HealEvent") then
+                    healing.HealEvent:FireServer(hrp, false)
+                end
+            end)
+        end
+    end
+end

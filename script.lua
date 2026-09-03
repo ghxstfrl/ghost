@@ -1,4 +1,3 @@
-lua
 local function __KysHub_Init_Main__()
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")

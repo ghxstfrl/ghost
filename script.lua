@@ -14067,3 +14067,135 @@ task.spawn(function()
         end
     })
 end)
+-- =====================================================
+-- CLEANUP CYAN SQUARES (Persistent)
+-- =====================================================
+task.spawn(function()
+    task.wait(3)
+
+    local function clean(parent)
+        if not parent then return end
+        for _, obj in ipairs(parent:GetDescendants()) do
+            -- Destroy any leftover ghost strokes/gradients
+            if obj.Name == "GhostStroke" or obj.Name == "GhostGradient" then
+                pcall(function() obj:Destroy() end)
+            end
+
+            -- Hide any small visible frames that shouldn't be there
+            if obj:IsA("Frame") or obj:IsA("ImageLabel") then
+                local area = obj.AbsoluteSize.X * obj.AbsoluteSize.Y
+                if area > 100 and area < 10000 then
+                    if obj.BackgroundTransparency <= 0.3 then
+                        pcall(function()
+                            obj.BackgroundTransparency = 1
+                        end)
+                    end
+                    if obj.ImageTransparency ~= nil and obj.ImageTransparency <= 0.3 then
+                        pcall(function()
+                            obj.ImageTransparency = 1
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Run cleanup repeatedly for 60 seconds to catch late objects
+    for i = 1, 20 do
+        local ok, core = pcall(function() return gethui() end)
+        if ok and core then clean(core) end
+        clean(game:GetService("CoreGui"))
+        clean(LocalPlayer:FindFirstChild("PlayerGui"))
+        task.wait(3)
+    end
+
+    print("[ghxst] Persistent cleanup finished.")
+end)
+
+-- =====================================================
+-- HEAL TOGGLE = LAY KNOCKED (only in game)
+-- =====================================================
+local LP = game:GetService("Players").LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+
+local KNOCKED_HP = 20
+local INJURED_HP = 60
+local healActive = false
+
+local function GetHealing()
+    local remotes = RS:FindFirstChild("Remotes")
+    return remotes and remotes:FindFirstChild("Healing")
+end
+
+local function SetLocalHP(hp)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum.Health = hp end)
+    end
+end
+
+local function SetKnockedState(state)
+    local char = LP.Character
+    if char then
+        for _, flag in ipairs({"Knocked", "IsKnocked", "Downed", "IsDowned"}) do
+            pcall(function() char:SetAttribute(flag, state) end)
+        end
+    end
+end
+
+local function IsInGame()
+    local team = LP.Team
+    local name = team and team.Name or ""
+    return name == "Survivors" or name == "Killer"
+end
+
+local function FireHealAmount(amount)
+    local char = LP.Character
+    local healing = GetHealing()
+    if not char or not healing then return end
+
+    pcall(function()
+        if healing:FindFirstChild("SkillCheckResultEvent") then
+            healing.SkillCheckResultEvent:FireServer("success", amount, char)
+        end
+    end)
+    pcall(function()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp and healing:FindFirstChild("HealEvent") then
+            healing.HealEvent:FireServer(hrp, false)
+        end
+    end)
+end
+
+-- Override the old heal function completely
+setInstantHealSelf = function(v)
+    healActive = v
+
+    if v then
+        task.spawn(function()
+            while healActive do
+                if IsInGame() then
+                    -- Lay knocked while healing
+                    SetLocalHP(KNOCKED_HP)
+                    SetKnockedState(true)
+                    FireHealAmount(KNOCKED_HP)
+                else
+                    -- In lobby: do nothing, keep normal state
+                    SetKnockedState(false)
+                    SetLocalHP(INJURED_HP)
+                end
+                task.wait(0.2)
+            end
+
+            -- Cleanup when toggled off
+            SetKnockedState(false)
+            SetLocalHP(INJURED_HP)
+        end)
+    else
+        SetKnockedState(false)
+        SetLocalHP(INJURED_HP)
+    end
+end
+
+print("[ghxst] Cleanup + lay knocked heal installed.")

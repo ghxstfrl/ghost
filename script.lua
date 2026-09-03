@@ -13403,3 +13403,470 @@ setInstantHealSelf = function(v)
         end
     end
 end
+-- =====================================================
+-- SMART HEAL OVERRIDE (Injured 60 / Knocked 20)
+-- =====================================================
+local LP = game:GetService("Players").LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+
+local SmartHeal = false
+local INJURED_HP = 60
+local KNOCKED_HP = 20
+
+local function GetHealing()
+    local remotes = RS:FindFirstChild("Remotes")
+    return remotes and remotes:FindFirstChild("Healing")
+end
+
+local function SetLocalHealth(hp)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum.Health = hp end)
+    end
+end
+
+local function SetKnocked(state)
+    local char = LP.Character
+    if char then
+        for _, flag in ipairs({"Knocked", "IsKnocked", "Downed", "IsDowned"}) do
+            pcall(function() char:SetAttribute(flag, state) end)
+        end
+    end
+end
+
+local function IsMoving()
+    local char = LP.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    return hrp.AssemblyLinearVelocity.Magnitude > 1
+end
+
+local function FireHeal(amount)
+    local char = LP.Character
+    if not char then return end
+
+    local healing = GetHealing()
+    if not healing then return end
+
+    -- Heal to the target amount
+    pcall(function()
+        if healing:FindFirstChild("SkillCheckResultEvent") then
+            healing.SkillCheckResultEvent:FireServer("success", amount, char)
+        end
+    end)
+
+    -- Stop server overheal so you don't go above the target
+    pcall(function()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp and healing:FindFirstChild("HealEvent") then
+            healing.HealEvent:FireServer(hrp, false)
+        end
+    end)
+end
+
+setInstantHealSelf = function(v)
+    SmartHeal = v
+
+    if v then
+        task.spawn(function()
+            while SmartHeal do
+                if IsMoving() then
+                    -- Injured state
+                    SetLocalHealth(INJURED_HP)
+                    SetKnocked(false)
+                    FireHeal(INJURED_HP)
+                else
+                    -- Knocked illusion while standing still
+                    SetLocalHealth(KNOCKED_HP)
+                    SetKnocked(true)
+                    FireHeal(KNOCKED_HP)
+                end
+                task.wait(0.15)
+            end
+
+            -- Cleanup when disabled
+            SetKnocked(false)
+            SetLocalHealth(INJURED_HP)
+        end)
+    else
+        SetKnocked(false)
+        SetLocalHealth(INJURED_HP)
+    end
+end
+-- =====================================================
+-- EXTRAS TAB (New Features)
+-- Paste at the very end of script.lua
+-- =====================================================
+
+local ExtraFeatures = {
+    AutoWiggle = false,
+    AutoAdrenaline = false,
+    AutoFlashlightSave = false,
+    KillerAutoPickup = false,
+    KillerAutoBreakGen = false,
+}
+
+-- Helper to fire a remote if it exists
+local function FireRemote(pathParts)
+    local current = game:GetService("ReplicatedStorage")
+    for _, part in ipairs(pathParts) do
+        current = current and current:FindFirstChild(part)
+        if not current then return nil end
+    end
+    if current and current:IsA("RemoteEvent") then
+        return current
+    end
+    return nil
+end
+
+-- Auto Wiggle (struggle) - press keys repeatedly while carried or hooked
+local lastWiggle = 0
+task.spawn(function()
+    while true do
+        if ExtraFeatures.AutoWiggle then
+            local char = LocalPlayer.Character
+            if char then
+                local carried = char:GetAttribute("IsCarried") or char:GetAttribute("isCarrying")
+                local hooked = char:GetAttribute("IsHooked") or char:GetAttribute("isHooked")
+                if (carried or hooked) and tick() - lastWiggle > 0.2 then
+                    lastWiggle = tick()
+                    pcall(function()
+                        local wiggle = FireRemote({"Remotes", "Struggle"}) or FireRemote({"Remotes", "Wiggle"})
+                        if wiggle then
+                            wiggle:FireServer()
+                        end
+                    end)
+                    pcall(function()
+                        local vim = game:GetService("VirtualInputManager")
+                        vim:SendKeyEvent(true, Enum.KeyCode.A, false, game)
+                        vim:SendKeyEvent(false, Enum.KeyCode.A, false, game)
+                        vim:SendKeyEvent(true, Enum.KeyCode.D, false, game)
+                        vim:SendKeyEvent(false, Enum.KeyCode.D, false, game)
+                    end)
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- Auto use Adrenaline Shot when downed / low HP
+task.spawn(function()
+    while true do
+        if ExtraFeatures.AutoAdrenaline then
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if char and hum and hum.Health > 0 and hum.Health <= 30 then
+                pcall(function()
+                    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                    local items = remotes and remotes:FindFirstChild("Items")
+                    local adrenaline = items and items:FindFirstChild("Adrenaline Shot")
+                    local fire = adrenaline and adrenaline:FindFirstChild("Fire")
+                    if fire then
+                        fire:FireServer(char)
+                    end
+                end)
+                -- If no remote, try clicking the item button via mobile GUI
+                pcall(function()
+                    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+                    local btn = pg and pg:FindFirstChild("AdrenalineShot", true)
+                    if btn and btn:IsA("GuiButton") then
+                        firesignal(btn.MouseButton1Click)
+                    end
+                end)
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Auto Flashlight Save: when killer is carrying a teammate, activate flashlight
+task.spawn(function()
+    while true do
+        if ExtraFeatures.AutoFlashlightSave then
+            local killer = nil
+            local carriedSurvivor = nil
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Team and p.Team.Name == "Killer" and p.Character then
+                    local carrying = p.Character:GetAttribute("IsCarrying") or p.Character:GetAttribute("isCarrying")
+                    if carrying then
+                        killer = p
+                        -- find carried survivor: maybe someone near killer with IsCarried
+                        for _, s in ipairs(Players:GetPlayers()) do
+                            if s ~= p and s.Team and s.Team.Name == "Survivors" and s.Character then
+                                if s.Character:GetAttribute("IsCarried") then
+                                    carriedSurvivor = s
+                                    break
+                                end
+                            end
+                        end
+                        break
+                    end
+                end
+            end
+            if killer and carriedSurvivor then
+                pcall(function()
+                    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                    local items = remotes and remotes:FindFirstChild("Items")
+                    local flashlight = items and items:FindFirstChild("Flashlight")
+                    local activate = flashlight and flashlight:FindFirstChild("Activate")
+                    if activate then
+                        activate:FireServer(true)
+                    end
+                end)
+            else
+                -- turn off flashlight if not needed
+                pcall(function()
+                    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                    local items = remotes and remotes:FindFirstChild("Items")
+                    local flashlight = items and items:FindFirstChild("Flashlight")
+                    local activate = flashlight and flashlight:FindFirstChild("Activate")
+                    if activate then
+                        activate:FireServer(false)
+                    end
+                end)
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Killer: Auto pick up downed survivor
+task.spawn(function()
+    while true do
+        if ExtraFeatures.KillerAutoPickup then
+            if GetRole() == "Killer" then
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= LocalPlayer and p.Team and p.Team.Name == "Survivors" and p.Character then
+                            local theirRoot = p.Character:FindFirstChild("HumanoidRootPart")
+                            local theirHum = p.Character:FindFirstChildOfClass("Humanoid")
+                            if theirRoot and theirHum and theirHum.Health <= 20 and theirHum.Health > 0 then
+                                local dist = (theirRoot.Position - myRoot.Position).Magnitude
+                                if dist <= 6 then
+                                    pcall(function()
+                                        local carry = FireRemote({"Remotes", "Carry", "CarrySurvivorEvent"})
+                                        if carry then
+                                            carry:FireServer(p.Character)
+                                        end
+                                    end)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Killer: Auto break generators when nearby
+task.spawn(function()
+    while true do
+        if ExtraFeatures.KillerAutoBreakGen then
+            if GetRole() == "Killer" then
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    local gens = getgenv().KYS_Cache and getgenv().KYS_Cache.Generators or {}
+                    for _, gen in ipairs(gens) do
+                        if gen.part and gen.part.Parent then
+                            local dist = (gen.part.Position - myRoot.Position).Magnitude
+                            if dist <= 6 then
+                                pcall(function()
+                                    local breakEvent = FireRemote({"Remotes", "Generator", "BreakGenEvent"})
+                                    if breakEvent then
+                                        breakEvent:FireServer(gen.part)
+                                    end
+                                end)
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Create Extras Tab in GUI
+if Window then
+    local ExtrasTab = Window:AddTab({ Name = "Extras", Icon = "lucide:zap", Type = "Single" })
+
+    local survivalSection = ExtrasTab:AddSection({
+        Position = "Center",
+        Name = "Survivor Extras",
+        Icon = "lucide:heart",
+        Box = true,
+        BoxBorder = true,
+        Opened = true,
+    })
+
+    survivalSection:AddToggle({
+        Name = "Auto Wiggle (Struggle)",
+        Flag = "Extra_AutoWiggle",
+        Default = false,
+        Callback = function(v)
+            ExtraFeatures.AutoWiggle = v
+        end
+    })
+
+    survivalSection:AddToggle({
+        Name = "Auto Adrenaline Shot (Low HP)",
+        Flag = "Extra_AutoAdrenaline",
+        Default = false,
+        Callback = function(v)
+            ExtraFeatures.AutoAdrenaline = v
+        end
+    })
+
+    survivalSection:AddToggle({
+        Name = "Auto Flashlight Save",
+        Flag = "Extra_AutoFlashlightSave",
+        Default = false,
+        Callback = function(v)
+            ExtraFeatures.AutoFlashlightSave = v
+        end
+    })
+
+    local killerSection = ExtrasTab:AddSection({
+        Position = "Center",
+        Name = "Killer Extras",
+        Icon = "lucide:sword",
+        Box = true,
+        BoxBorder = true,
+        Opened = true,
+    })
+
+    killerSection:AddToggle({
+        Name = "Auto Pickup Downed Survivor",
+        Flag = "Extra_KillerAutoPickup",
+        Default = false,
+        Callback = function(v)
+            ExtraFeatures.KillerAutoPickup = v
+        end
+    })
+
+    killerSection:AddToggle({
+        Name = "Auto Break Generators",
+        Flag = "Extra_KillerAutoBreakGen",
+        Default = false,
+        Callback = function(v)
+            ExtraFeatures.KillerAutoBreakGen = v
+        end
+    })
+end
+
+print("[Extras Tab] Loaded.")
+-- =====================================================
+-- GHXST GUI BRANDING + GHOST EFFECT + GRADIENT
+-- Paste at the very end of script.lua
+-- =====================================================
+
+local GHOST_TITLE = "ghxst"
+local GHOST_SUBTITLE = "ghxst.lol"
+local GRADIENT_COLOR_TOP = Color3.fromRGB(130, 240, 255)   -- cyan
+local GRADIENT_COLOR_BOTTOM = Color3.fromRGB(160, 100, 255) -- purple
+local GHOST_ACCENT = Color3.fromRGB(180, 250, 255)
+
+task.spawn(function()
+    task.wait(2)
+
+    local function applyToGui(screenGui)
+        if not screenGui then return end
+
+        -- Rename title and subtitle
+        for _, obj in ipairs(screenGui:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local txt = obj.Text or ""
+                if txt:find("KysHub") or txt:find("Violence District") then
+                    if txt:find("KysHub") then
+                        obj.Text = GHOST_TITLE
+                    elseif txt:find("Violence District") then
+                        obj.Text = GHOST_SUBTITLE
+                    end
+                end
+            end
+        end
+
+        -- Apply ghost font and colors
+        for _, obj in ipairs(screenGui:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+                obj.Font = Enum.Font.Gotham
+                obj.TextColor3 = Color3.fromRGB(230, 245, 250)
+                obj.TextStrokeTransparency = 0.6
+            end
+
+            if obj:IsA("UIStroke") then
+                obj.Color = GHOST_ACCENT
+                obj.Transparency = 0.5
+            end
+        end
+
+        -- Add gradient to the main window frame
+        local mainFrame = nil
+        local largestArea = 0
+        for _, frame in ipairs(screenGui:GetDescendants()) do
+            if frame:IsA("Frame") and frame.Visible then
+                local area = frame.AbsoluteSize.X * frame.AbsoluteSize.Y
+                if area > largestArea then
+                    largestArea = area
+                    mainFrame = frame
+                end
+            end
+        end
+
+        if mainFrame then
+            local existingGradient = mainFrame:FindFirstChildOfClass("UIGradient")
+            if existingGradient then
+                existingGradient:Destroy()
+            end
+
+            local gradient = Instance.new("UIGradient")
+            gradient.Name = "GhostGradient"
+            gradient.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, GRADIENT_COLOR_TOP),
+                ColorSequenceKeypoint.new(1, GRADIENT_COLOR_BOTTOM)
+            })
+            gradient.Rotation = 45
+            gradient.Parent = mainFrame
+
+            -- Ghost stroke on main window
+            local stroke = Instance.new("UIStroke")
+            stroke.Name = "GhostStroke"
+            stroke.Color = GHOST_ACCENT
+            stroke.Thickness = 1.5
+            stroke.Transparency = 0.4
+            stroke.Parent = mainFrame
+
+            -- Slight transparency for ghost feel
+            if mainFrame.BackgroundTransparency > 0.9 then
+                mainFrame.BackgroundTransparency = 0.15
+            end
+        end
+    end
+
+    -- Find all relevant ScreenGuis
+    local coreGui = gethui and gethui() or game:GetService("CoreGui")
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+
+    for _, gui in ipairs(coreGui:GetDescendants()) do
+        if gui:IsA("ScreenGui") then
+            applyToGui(gui)
+        end
+    end
+
+    if playerGui then
+        for _, gui in ipairs(playerGui:GetDescendants()) do
+            if gui:IsA("ScreenGui") then
+                applyToGui(gui)
+            end
+        end
+    end
+
+    print("[ghxst] GUI branding applied.")
+end)

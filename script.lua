@@ -13763,110 +13763,99 @@ end
 
 print("[Extras Tab] Loaded.")
 -- =====================================================
--- GHXST GUI BRANDING + GHOST EFFECT + GRADIENT
+-- GHXST GUI BRANDING + GHOST EFFECT + GRADIENT (Persistent)
 -- Paste at the very end of script.lua
 -- =====================================================
 
 local GHOST_TITLE = "ghxst"
 local GHOST_SUBTITLE = "ghxst.lol"
-local GRADIENT_COLOR_TOP = Color3.fromRGB(130, 240, 255)   -- cyan
-local GRADIENT_COLOR_BOTTOM = Color3.fromRGB(160, 100, 255) -- purple
+local GRADIENT_COLOR_TOP = Color3.fromRGB(130, 240, 255)
+local GRADIENT_COLOR_BOTTOM = Color3.fromRGB(160, 100, 255)
 local GHOST_ACCENT = Color3.fromRGB(180, 250, 255)
 
-task.spawn(function()
-    task.wait(2)
+local function styleObject(obj)
+    if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+        obj.Font = Enum.Font.Gotham
+        obj.TextColor3 = Color3.fromRGB(230, 245, 250)
+        obj.TextStrokeTransparency = 0.6
 
-    local function applyToGui(screenGui)
-        if not screenGui then return end
-
-        -- Rename title and subtitle
-        for _, obj in ipairs(screenGui:GetDescendants()) do
-            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-                local txt = obj.Text or ""
-                if txt:find("KysHub") or txt:find("Violence District") then
-                    if txt:find("KysHub") then
-                        obj.Text = GHOST_TITLE
-                    elseif txt:find("Violence District") then
-                        obj.Text = GHOST_SUBTITLE
-                    end
-                end
-            end
-        end
-
-        -- Apply ghost font and colors
-        for _, obj in ipairs(screenGui:GetDescendants()) do
-            if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
-                obj.Font = Enum.Font.Gotham
-                obj.TextColor3 = Color3.fromRGB(230, 245, 250)
-                obj.TextStrokeTransparency = 0.6
-            end
-
-            if obj:IsA("UIStroke") then
-                obj.Color = GHOST_ACCENT
-                obj.Transparency = 0.5
-            end
-        end
-
-        -- Add gradient to the main window frame
-        local mainFrame = nil
-        local largestArea = 0
-        for _, frame in ipairs(screenGui:GetDescendants()) do
-            if frame:IsA("Frame") and frame.Visible then
-                local area = frame.AbsoluteSize.X * frame.AbsoluteSize.Y
-                if area > largestArea then
-                    largestArea = area
-                    mainFrame = frame
-                end
-            end
-        end
-
-        if mainFrame then
-            local existingGradient = mainFrame:FindFirstChildOfClass("UIGradient")
-            if existingGradient then
-                existingGradient:Destroy()
-            end
-
-            local gradient = Instance.new("UIGradient")
-            gradient.Name = "GhostGradient"
-            gradient.Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, GRADIENT_COLOR_TOP),
-                ColorSequenceKeypoint.new(1, GRADIENT_COLOR_BOTTOM)
-            })
-            gradient.Rotation = 45
-            gradient.Parent = mainFrame
-
-            -- Ghost stroke on main window
-            local stroke = Instance.new("UIStroke")
-            stroke.Name = "GhostStroke"
-            stroke.Color = GHOST_ACCENT
-            stroke.Thickness = 1.5
-            stroke.Transparency = 0.4
-            stroke.Parent = mainFrame
-
-            -- Slight transparency for ghost feel
-            if mainFrame.BackgroundTransparency > 0.9 then
-                mainFrame.BackgroundTransparency = 0.15
-            end
+        local txt = obj.Text or ""
+        if txt:find("KysHub") then
+            obj.Text = GHOST_TITLE
+        elseif txt:find("Violence District") then
+            obj.Text = GHOST_SUBTITLE
         end
     end
 
-    -- Find all relevant ScreenGuis
+    if obj:IsA("UIStroke") then
+        obj.Color = GHOST_ACCENT
+        obj.Transparency = 0.5
+    end
+
+    -- Gradient on large frames
+    if obj:IsA("Frame") and obj.Visible then
+        local area = obj.AbsoluteSize.X * obj.AbsoluteSize.Y
+        if area > 50000 then
+            local existingGrad = obj:FindFirstChild("GhostGradient")
+            if not existingGrad then
+                local grad = Instance.new("UIGradient")
+                grad.Name = "GhostGradient"
+                grad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, GRADIENT_COLOR_TOP),
+                    ColorSequenceKeypoint.new(1, GRADIENT_COLOR_BOTTOM)
+                })
+                grad.Rotation = 45
+                grad.Parent = obj
+            end
+
+            local existingStroke = obj:FindFirstChild("GhostStroke")
+            if not existingStroke then
+                local stroke = Instance.new("UIStroke")
+                stroke.Name = "GhostStroke"
+                stroke.Color = GHOST_ACCENT
+                stroke.Thickness = 1.5
+                stroke.Transparency = 0.4
+                stroke.Parent = obj
+            end
+
+            if obj.BackgroundTransparency > 0.9 then
+                obj.BackgroundTransparency = 0.15
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    task.wait(10)
+
     local coreGui = gethui and gethui() or game:GetService("CoreGui")
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
 
-    for _, gui in ipairs(coreGui:GetDescendants()) do
-        if gui:IsA("ScreenGui") then
-            applyToGui(gui)
-        end
-    end
+    local containers = {}
+    if coreGui then table.insert(containers, coreGui) end
+    if playerGui then table.insert(containers, playerGui) end
 
-    if playerGui then
-        for _, gui in ipairs(playerGui:GetDescendants()) do
-            if gui:IsA("ScreenGui") then
-                applyToGui(gui)
+    local function applyAll()
+        for _, container in ipairs(containers) do
+            for _, obj in ipairs(container:GetDescendants()) do
+                pcall(styleObject, obj)
             end
         end
     end
 
-    print("[ghxst] GUI branding applied.")
+    -- Hook new elements
+    for _, container in ipairs(containers) do
+        container.DescendantAdded:Connect(function(obj)
+            task.defer(styleObject, obj)
+        end)
+    end
+
+    -- Apply immediately, then repeatedly for 60 seconds
+    applyAll()
+    for i = 1, 20 do
+        task.wait(3)
+        applyAll()
+    end
+
+    print("[ghxst] GUI branding applied (persistent).")
 end)
